@@ -95,6 +95,13 @@ export class BaseConfig implements VideoCodecSWConfig {
       twoPass: this.eligibleForTwoPass(),
       progress: { frameCount: videoStream.frameCount, percentInterval: 5 },
     } as TranscodeCommand;
+
+    // For stream-copy targets, skip all encoding-specific options (filters, presets, bitrate, threads)
+    if (target === TranscodeTarget.Copy) {
+      options.twoPass = false;
+      return options;
+    }
+
     if ([TranscodeTarget.All, TranscodeTarget.Video].includes(target)) {
       const filters = this.getFilterOptions(videoStream);
       if (filters.length > 0) {

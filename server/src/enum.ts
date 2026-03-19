@@ -398,6 +398,7 @@ export enum TranscodeTarget {
   Audio = 'AUDIO',
   Video = 'VIDEO',
   All = 'ALL',
+  Copy = 'COPY',
 }
 
 export enum VideoCodec {

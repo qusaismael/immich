@@ -32,6 +32,12 @@ import { getForGenerateThumbnail } from 'test/mappers';
 import { factory, newUuid } from 'test/small.factory';
 import { makeStream, newTestService, ServiceMocks } from 'test/utils';
 
+vi.mock('src/utils/mp4.util', () => ({
+  isFaststartOptimized: vi.fn().mockResolvedValue(true),
+}));
+
+import { isFaststartOptimized } from 'src/utils/mp4.util';
+
 const fullsizeBuffer = Buffer.from('embedded image data');
 const rawBuffer = Buffer.from('raw image data');
 const extractedBuffer = Buffer.from('embedded image file');
@@ -2052,6 +2058,64 @@ describe(MediaService.name, () => {
       mocks.media.probe.mockResolvedValue(probeStub.videoStream40Mbps);
       mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Bitrate, maxBitrate: '0' } });
       await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).not.toHaveBeenCalled();
+    });
+
+    it('should stream-copy web-compatible MP4 with faststart instead of skipping', async () => {
+      vi.mocked(isFaststartOptimized).mockResolvedValue(false);
+      mocks.media.probe.mockResolvedValue(probeStub.videoStreamH264);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).toHaveBeenCalledWith(
+        '/original/path.ext',
+        expect.any(String),
+        expect.objectContaining({
+          inputOptions: expect.any(Array),
+          outputOptions: expect.arrayContaining(['-c:v copy', '-c:a copy', '-movflags faststart']),
+          twoPass: false,
+        }),
+      );
+      expect(mocks.asset.upsertFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: AssetFileType.EncodedVideo,
+          isEdited: false,
+        }),
+      );
+    });
+
+    it('should not include encoding options in stream-copy command', async () => {
+      vi.mocked(isFaststartOptimized).mockResolvedValue(false);
+      mocks.media.probe.mockResolvedValue(probeStub.videoStreamH264);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).toHaveBeenCalledWith(
+        '/original/path.ext',
+        expect.any(String),
+        expect.objectContaining({
+          outputOptions: expect.not.arrayContaining([
+            expect.stringContaining('-preset'),
+            expect.stringContaining('-crf'),
+            expect.stringContaining('scale'),
+          ]),
+        }),
+      );
+    });
+
+    it('should still skip non-MP4 containers that do not need transcoding', async () => {
+      mocks.media.probe.mockResolvedValue(probeStub.videoStreamVp9);
+      mocks.systemMetadata.get.mockResolvedValue({
+        ffmpeg: { transcode: TranscodePolicy.Required, acceptedVideoCodecs: [VideoCodec.Vp9], acceptedContainers: ['matroska,webm'] },
+      });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).not.toHaveBeenCalled();
+    });
+
+    it('should skip stream-copy when MP4 is already faststart-optimized', async () => {
+      vi.mocked(isFaststartOptimized).mockResolvedValue(true);
+      mocks.media.probe.mockResolvedValue(probeStub.videoStreamH264);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      const result = await sut.handleVideoConversion({ id: 'video-id' });
+      expect(result).toBe(JobStatus.Skipped);
       expect(mocks.media.transcode).not.toHaveBeenCalled();
     });
 

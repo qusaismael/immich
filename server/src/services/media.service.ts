@@ -44,6 +44,7 @@ import { checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor';
 import { BaseConfig, ThumbnailConfig } from 'src/utils/media';
 import { mimeTypes } from 'src/utils/mime-types';
 import { clamp, isFaceImportEnabled, isFacialRecognitionEnabled } from 'src/utils/misc';
+import { isFaststartOptimized } from 'src/utils/mp4.util';
 import { getOutputDimensions } from 'src/utils/transform';
 
 interface UpsertFileOptions {
@@ -604,7 +605,44 @@ export class MediaService extends BaseService {
 
     let { ffmpeg } = await this.getConfig({ withCache: true });
     const target = this.getTranscodeTarget(ffmpeg, videoStream, audioStream);
-    if (target === TranscodeTarget.None && !this.isRemuxRequired(ffmpeg, format)) {
+    const isRemuxNeeded = this.isRemuxRequired(ffmpeg, format);
+    if (target === TranscodeTarget.None && !isRemuxNeeded) {
+      // Container is acceptable, check if we need a faststart optimization for MP4/MOV
+      const isMp4 =
+        format.formatName?.includes('mp4') ||
+        (format.formatLongName === 'QuickTime / MOV' && format.formatName?.includes('mov'));
+
+      if (isMp4) {
+        const isOptimized = await isFaststartOptimized(input);
+
+        if (isOptimized) {
+          this.logger.log(`Asset ${asset.id} is already faststart-optimized, skipping stream copy`);
+          const encodedVideo = getAssetFile(asset.files, AssetFileType.EncodedVideo, { isEdited: false });
+          if (encodedVideo) {
+            this.logger.log(`Stale encoded video exists for asset ${asset.id}, deleting...`);
+            await this.jobRepository.queue({ name: JobName.FileDelete, data: { files: [encodedVideo.path] } });
+            await this.assetRepository.deleteFiles([encodedVideo]);
+          }
+          return JobStatus.Skipped;
+        }
+
+        // Perform a lightweight stream-copy pass to move moov atom to the start of the file
+        this.logger.log(`Asset ${asset.id} requires faststart optimization, applying stream copy`);
+        const command = BaseConfig.create(ffmpeg, this.videoInterfaces).getCommand(
+          TranscodeTarget.Copy,
+          videoStream,
+          audioStream,
+        );
+        await this.mediaRepository.transcode(input, output, command);
+        await this.assetRepository.upsertFile({
+          assetId: asset.id,
+          type: AssetFileType.EncodedVideo,
+          path: output,
+          isEdited: false,
+        });
+        return JobStatus.Success;
+      }
+
       const encodedVideo = getAssetFile(asset.files, AssetFileType.EncodedVideo, { isEdited: false });
       if (encodedVideo) {
         this.logger.log(`Transcoded video exists for asset ${asset.id}, but is no longer required. Deleting...`);
