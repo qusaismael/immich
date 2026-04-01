@@ -56,6 +56,7 @@ interface UpsertFileOptions {
 }
 
 type ThumbnailAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForGenerateThumbnailJob']>>>;
+const FRAGMENTED_MP4_BRANDS = new Set(['iso5', 'iso6', 'dash', 'msdh', 'msix', 'cmfc']);
 
 @Injectable()
 export class MediaService extends BaseService {
@@ -751,13 +752,36 @@ export class MediaService extends BaseService {
     }
   }
 
-  private isRemuxRequired(ffmpegConfig: SystemConfigFFmpegDto, { formatName, formatLongName }: VideoFormat): boolean {
+  private isRemuxRequired(ffmpegConfig: SystemConfigFFmpegDto, { formatName, formatLongName, tags }: VideoFormat): boolean {
     if (ffmpegConfig.transcode === TranscodePolicy.Disabled) {
       return false;
     }
 
-    const name = formatLongName === 'QuickTime / MOV' ? VideoContainer.Mov : (formatName as VideoContainer);
-    return name !== VideoContainer.Mp4 && !ffmpegConfig.acceptedContainers.includes(name);
+    const formatLongNameMapping: Record<string, VideoContainer> = {
+      'QuickTime / MOV': VideoContainer.Mov,
+      'Matroska / WebM': VideoContainer.Webm,
+    };
+
+    const name = (formatLongName ? formatLongNameMapping[formatLongName] : undefined) ?? (formatName as VideoContainer);
+    if (name !== VideoContainer.Mp4 && !ffmpegConfig.acceptedContainers.includes(name)) {
+      return true;
+    }
+
+    if (!formatName?.includes('mp4') && formatLongName !== 'QuickTime / MOV') {
+      return false;
+    }
+
+    const majorBrand = tags?.major_brand;
+    if (majorBrand && FRAGMENTED_MP4_BRANDS.has(majorBrand)) {
+      return true;
+    }
+
+    const compatibleBrands = tags?.compatible_brands;
+    if (!compatibleBrands) {
+      return false;
+    }
+
+    return Array.from(FRAGMENTED_MP4_BRANDS).some((brand) => compatibleBrands.includes(brand));
   }
 
   isSRGB({

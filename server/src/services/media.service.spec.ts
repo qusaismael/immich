@@ -2055,6 +2055,75 @@ describe(MediaService.name, () => {
       expect(mocks.media.transcode).not.toHaveBeenCalled();
     });
 
+    it('should remux fragmented MP4 (fMP4) files based on probe metadata', async () => {
+      mocks.media.probe.mockResolvedValue(probeStub.fragmentedMp4);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).toHaveBeenCalledWith(
+        '/original/path.ext',
+        expect.any(String),
+        expect.objectContaining({
+          inputOptions: expect.any(Array),
+          outputOptions: expect.arrayContaining(['-c:v copy', '-c:a copy', '-movflags faststart']),
+          twoPass: false,
+        }),
+      );
+      expect(mocks.asset.upsertFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: AssetFileType.EncodedVideo,
+          isEdited: false,
+        }),
+      );
+    });
+
+    it('should remux fragmented MP4 when only compatible_brands indicates fragmentation', async () => {
+      mocks.media.probe.mockResolvedValue(probeStub.fragmentedMp4CompatibleBrands);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).toHaveBeenCalledWith(
+        '/original/path.ext',
+        expect.any(String),
+        expect.objectContaining({
+          outputOptions: expect.arrayContaining(['-c:v copy', '-c:a copy', '-movflags faststart']),
+          twoPass: false,
+        }),
+      );
+    });
+
+    it('should not include encoding options when remuxing fragmented MP4', async () => {
+      mocks.media.probe.mockResolvedValue(probeStub.fragmentedMp4);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).toHaveBeenCalledWith(
+        '/original/path.ext',
+        expect.any(String),
+        expect.objectContaining({
+          outputOptions: expect.not.arrayContaining([
+            expect.stringContaining('-preset'),
+            expect.stringContaining('-crf'),
+            expect.stringContaining('scale'),
+          ]),
+        }),
+      );
+    });
+
+    it('should still skip non-MP4 containers that do not need transcoding', async () => {
+      mocks.media.probe.mockResolvedValue(probeStub.videoStreamVp9);
+      mocks.systemMetadata.get.mockResolvedValue({
+        ffmpeg: { transcode: TranscodePolicy.Required, acceptedVideoCodecs: [VideoCodec.Vp9], acceptedContainers: ['matroska,webm'] },
+      });
+      await sut.handleVideoConversion({ id: 'video-id' });
+      expect(mocks.media.transcode).not.toHaveBeenCalled();
+    });
+
+    it('should skip remux for standard MP4s', async () => {
+      mocks.media.probe.mockResolvedValue(probeStub.videoStreamH264);
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
+      const result = await sut.handleVideoConversion({ id: 'video-id' });
+      expect(result).toBe(JobStatus.Skipped);
+      expect(mocks.media.transcode).not.toHaveBeenCalled();
+    });
+
     it('should not scale resolution if no target resolution', async () => {
       mocks.media.probe.mockResolvedValue(probeStub.videoStream2160p);
       mocks.systemMetadata.get.mockResolvedValue({
