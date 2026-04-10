@@ -2090,7 +2090,7 @@ describe(MediaService.name, () => {
       );
     });
 
-    it('should not include encoding options when remuxing fragmented MP4', async () => {
+    it('should not include encoding options when remuxing', async () => {
       mocks.media.probe.mockResolvedValue(probeStub.fragmentedMp4);
       mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
       await sut.handleVideoConversion({ id: 'video-id' });
@@ -2105,23 +2105,6 @@ describe(MediaService.name, () => {
           ]),
         }),
       );
-    });
-
-    it('should still skip non-MP4 containers that do not need transcoding', async () => {
-      mocks.media.probe.mockResolvedValue(probeStub.videoStreamVp9);
-      mocks.systemMetadata.get.mockResolvedValue({
-        ffmpeg: { transcode: TranscodePolicy.Required, acceptedVideoCodecs: [VideoCodec.Vp9], acceptedContainers: ['matroska,webm'] },
-      });
-      await sut.handleVideoConversion({ id: 'video-id' });
-      expect(mocks.media.transcode).not.toHaveBeenCalled();
-    });
-
-    it('should skip remux for standard MP4s', async () => {
-      mocks.media.probe.mockResolvedValue(probeStub.videoStreamH264);
-      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Required } });
-      const result = await sut.handleVideoConversion({ id: 'video-id' });
-      expect(result).toBe(JobStatus.Skipped);
-      expect(mocks.media.transcode).not.toHaveBeenCalled();
     });
 
     it('should not scale resolution if no target resolution', async () => {

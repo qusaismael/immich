@@ -56,7 +56,7 @@ interface UpsertFileOptions {
 }
 
 type ThumbnailAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForGenerateThumbnailJob']>>>;
-const FRAGMENTED_MP4_BRANDS = new Set(['iso5', 'iso6', 'dash', 'msdh', 'msix', 'cmfc']);
+const FRAGMENTED_MP4_BRANDS = ['iso5', 'iso6', 'dash', 'msdh', 'msix', 'cmfc'];
 
 @Injectable()
 export class MediaService extends BaseService {
@@ -772,7 +772,7 @@ export class MediaService extends BaseService {
     }
 
     const majorBrand = tags?.major_brand;
-    if (majorBrand && FRAGMENTED_MP4_BRANDS.has(majorBrand)) {
+    if (majorBrand && FRAGMENTED_MP4_BRANDS.includes(majorBrand)) {
       return true;
     }
 
@@ -781,7 +781,7 @@ export class MediaService extends BaseService {
       return false;
     }
 
-    return Array.from(FRAGMENTED_MP4_BRANDS).some((brand) => compatibleBrands.includes(brand));
+    return FRAGMENTED_MP4_BRANDS.some((brand) => compatibleBrands.includes(brand));
   }
 
   isSRGB({
